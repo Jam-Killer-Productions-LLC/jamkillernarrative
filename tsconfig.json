@@ -1,0 +1,15 @@
+{
+    "compilerOptions": {
+      "target": "esnext",
+      "module": "esnext",
+      "lib": ["esnext"],
+      "strict": true,
+      "esModuleInterop": true,
+      "moduleResolution": "node",
+      "isolatedModules": true,
+      "noEmit": true,
+      "jsx": "preserve",
+      "types": ["@cloudflare/workers-types"]
+    },
+    "include": ["worker/**/*.ts"]
+  }

@@ -12,9 +12,5 @@
       "binding": "narrativesjamkiller",
       "id": "6b9112d813cc40ecad501256d120c05c"
     }
-  ],
-  "vars": {
-    "IPFS_UPLOAD_URL": "https://a-jamkiller-narrative.quicknode-ipfs.com/ipfs",
-    "IPFS_API_KEY": "QN_b4e06bf0276943e2866640a230e327b7"
-  }
+  ]
 }

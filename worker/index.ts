@@ -1,6 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 
-import { Hono } from 'hono';
+import { Hono } from 'hono'; // or: import Hono from 'hono'; based on your version
 import { cors } from 'hono/cors';
 
 // Type definitions for narrative state and final narrative data
@@ -13,7 +13,7 @@ interface FinalNarrativeData {
   narrativeText: string;
   mojoScore: number;
   timestamp: number;
-  // This is not the final NFT metadata—it's the narrative data used to build NFT metadata later.
+  // This is narrative data for the front end to build final NFT metadata later.
 }
 
 // Environment interface: includes KV and AI binding
@@ -48,7 +48,7 @@ const rateLimit = {
 };
 
 app.use('/narrative/update/*', async (c: Hono.Context<Env>, next: () => Promise<void>) => {
-  const key = c.req.ip;
+  const key = c.req.headers.get('cf-connecting-ip') || 'unknown';
   if (limiter.has(key)) {
     const [count, reset] = limiter.get(key)!;
     if (count >= rateLimit.max) {
@@ -63,20 +63,18 @@ app.use('/narrative/update/*', async (c: Hono.Context<Env>, next: () => Promise<
 
 /**
  * POST /narrative/update/:userId
- * Appends a new answer to the user's narrative state stored in the KV namespace "narrativesjamkiller".
+ * Appends a new answer to the user's narrative state stored in KV.
  */
 app.post('/narrative/update/:userId', async (c: Hono.Context<Env>) => {
   try {
     const userId = c.req.param('userId');
     const { answer } = await c.req.json<{ answer: string }>();
 
-    // Validate input: answer must be non-empty and within a reasonable length.
     if (!answer || typeof answer !== 'string' || answer.trim().length === 0 || answer.length > 1000) {
       return c.json({ error: 'Invalid answer provided' }, 400);
     }
     const sanitizedAnswer = answer.trim();
 
-    // Retrieve existing narrative state from KV.
     const existingData = await c.env.narrativesjamkiller.get(userId);
     let state: NarrativeState;
     if (existingData) {
@@ -88,7 +86,6 @@ app.post('/narrative/update/:userId', async (c: Hono.Context<Env>) => {
     } else {
       state = { answers: [sanitizedAnswer], createdAt: Date.now() };
     }
-    // Save updated state to KV.
     await c.env.narrativesjamkiller.put(userId, JSON.stringify(state));
     return c.json({ message: 'Answer added successfully', state });
   } catch (error) {
@@ -102,7 +99,7 @@ app.post('/narrative/update/:userId', async (c: Hono.Context<Env>) => {
  * Finalizes the narrative:
  * - Retrieves stored answers,
  * - Builds a prompt and calls the AI to generate the final narrative,
- * - Computes a Mojo score based on the total length of answers,
+ * - Computes a Mojo score based on answer lengths,
  * - Returns the final narrative data to the front end.
  */
 app.post('/narrative/finalize/:userId', async (c: Hono.Context<Env>) => {
@@ -117,22 +114,19 @@ app.post('/narrative/finalize/:userId', async (c: Hono.Context<Env>) => {
       return c.json({ error: 'Insufficient answers to finalize narrative' }, 400);
     }
 
-    // Build a prompt from the collected answers.
     const promptContent = state.answers.join('\n');
-    const systemMessage = `You are a narrative storyteller for "Don't Kill The Jam, a Jam Killer Story." The user has chosen a path and provided the following answers:\n${promptContent}\nUsing this context, generate a creative and detailed narrative that reflects their journey in a dystopian music world.`;
+    const systemMessage = `You are a narrative storyteller for "Don't Kill The Jam, a Jam Killer Story." The user provided these answers:\n${promptContent}\nGenerate a creative, detailed narrative that captures their dystopian music journey.`;
     const userMessage = "Provide a final narrative text with rich imagery and emotional depth.";
     const messages = [
       { role: "system", content: systemMessage },
       { role: "user", content: userMessage }
     ];
 
-    // Call the AI to generate the final narrative.
     const aiResponse = await c.env.AI.run("@cf/meta/llama-3-8b-instruct", { messages });
     const finalNarrativeText = aiResponse.choices[0].message.content;
 
-    // Compute Mojo score based on the total length of user answers.
     const totalAnswerLength = state.answers.reduce((sum, ans) => sum + ans.length, 0);
-    const mojoScore = totalAnswerLength; // Adjust this formula as needed.
+    const mojoScore = totalAnswerLength; // Adjust formula as needed
 
     const finalNarrativeData: FinalNarrativeData = {
       narrativeText: finalNarrativeText,
@@ -140,10 +134,7 @@ app.post('/narrative/finalize/:userId', async (c: Hono.Context<Env>) => {
       timestamp: Date.now()
     };
 
-    // Optionally, remove the narrative state from KV.
     await c.env.narrativesjamkiller.delete(userId);
-
-    // Return the final narrative data.
     return c.json({ message: 'Narrative finalized successfully', data: finalNarrativeData });
   } catch (error) {
     console.error('Error finalizing narrative:', error);

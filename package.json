@@ -1,0 +1,26 @@
+{
+  "name": "jamkillernarrative",
+  "version": "1.0.0",
+  "description": "<!-- dash-content-start -->",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jam-Killer-Productions-LLC/jamkillernarrative.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Jam-Killer-Productions-LLC/jamkillernarrative/issues"
+  },
+  "homepage": "https://github.com/Jam-Killer-Productions-LLC/jamkillernarrative#readme",
+  "dependencies": {
+    "hono": "^4.7.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250313.0"
+  }
+}
