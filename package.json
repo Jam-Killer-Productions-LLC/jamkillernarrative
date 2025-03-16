@@ -2,8 +2,11 @@
   "name": "jamkillernarrative",
   "version": "1.0.0",
   "description": "<!-- dash-content-start -->",
-  "main": "index.js",
+  "main": "worker/index.ts",
   "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler build",
+    "deploy": "wrangler publish",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -18,6 +21,7 @@
   },
   "homepage": "https://github.com/Jam-Killer-Productions-LLC/jamkillernarrative#readme",
   "dependencies": {
+    "@cloudflare/wrangler": "^4.0.0",
     "hono": "^4.7.4"
   },
   "devDependencies": {
