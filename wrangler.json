@@ -1,6 +1,6 @@
 {
-  "name": "jamkillernarrator",
-  "main": "src/index.ts",
+  "jamkillernarrator",
+  "main": "worker/index.ts",
   "compatibility_date": "2025-03-07",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
@@ -11,6 +11,10 @@
     {
       "binding": "narrativesjamkiller",
       "id": "6b9112d813cc40ecad501256d120c05c"
+    },
+    {
+      "binding": "RATE_LIMIT_KV",
+      "id": "6e8ac8496fb5468faa26a00eaf47cb1a"
     }
   ]
 }
