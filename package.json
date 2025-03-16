@@ -21,7 +21,6 @@
   },
   "homepage": "https://github.com/Jam-Killer-Productions-LLC/jamkillernarrative#readme",
   "dependencies": {
-    "@cloudflare/wrangler": "^4.0.0",
     "hono": "^4.7.4"
   },
   "devDependencies": {

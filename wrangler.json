@@ -1,5 +1,5 @@
 {
-  "jamkillernarrator",
+  "name": "jamkillernarrator",
   "main": "worker/index.ts",
   "compatibility_date": "2025-03-07",
   "compatibility_flags": ["nodejs_compat"],
