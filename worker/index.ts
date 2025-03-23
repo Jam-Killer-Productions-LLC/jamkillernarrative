@@ -49,6 +49,9 @@ app.use('*', cors({
   maxAge: 86400,
 }));
 
+// Add root route handler
+app.get('/', (c) => c.json({ status: 'ok', message: 'Narrative API is running' }));
+
 // Security headers middleware
 app.use('*', async (c: Context<{ Bindings: Env }>, next: () => Promise<void>) => {
   c.header('X-Content-Type-Options', 'nosniff');
