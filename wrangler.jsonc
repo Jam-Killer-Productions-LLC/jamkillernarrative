@@ -9,11 +9,6 @@
   },
   "kv_namespaces": [
     {
-      "binding": "narrativesjamkiller",
-      "id": "6b9112d813cc40ecad501256d120c05c",
-      "preview_id": "6b9112d813cc40ecad501256d120c05c"
-    },
-    {
       "binding": "RATE_LIMIT_KV",
       "id": "6e8ac8496fb5468faa26a00eaf47cb1a",
       "preview_id": "6e8ac8496fb5468faa26a00eaf47cb1a"
@@ -21,5 +16,24 @@
   ],
   "ai": {
     "binding": "AI"
-  }
-} 
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "NARRATIVE_DO",
+        "class_name": "NarrativeDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "NarrativeDO"
+      ]
+    }
+  ],
+  "routes": [
+    "https://narratives.producerprotocol.pro/*"
+  ]
+}
