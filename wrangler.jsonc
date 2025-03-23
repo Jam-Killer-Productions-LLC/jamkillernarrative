@@ -34,6 +34,9 @@
     }
   ],
   "routes": [
-    "https://narratives.producerprotocol.pro/*"
+    {
+      "pattern": "https://narratives.producerprotocol.pro/*",
+      "zone_id": "b0e0d96207a3b3f37f8b4093982e34c1"
+    }
   ]
 }
