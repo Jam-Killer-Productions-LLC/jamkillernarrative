@@ -7,7 +7,7 @@ import { prettyJSON } from 'hono/pretty-json';
 import type { Context } from 'hono';
 
 /**
- * Environment interface for our worker and DO.
+ * Environment interface shared by both the front-end routes and the Durable Object.
  */
 interface Env {
   NARRATIVE_DO: DurableObjectNamespace;
@@ -21,29 +21,24 @@ interface Env {
 }
 
 /**
- * Durable Object Class: NarrativeDO
- * This class manages the narrative state, handling updates and finalization.
+ * Durable Object class for managing narrative state.
  */
 export class NarrativeDO {
   state: DurableObjectState;
-  narrativeState: {
-    answers: string[];
-    createdAt: number;
-    lastUpdated: number;
-  };
+  narrativeState: { answers: string[]; createdAt: number; lastUpdated: number };
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
-    // Initialize state with default values.
+    // Initialize with an empty state.
     this.narrativeState = { answers: [], createdAt: Date.now(), lastUpdated: Date.now() };
-    // Block concurrency until we load any stored state.
+    // Block concurrency until state initialization is complete.
     state.blockConcurrencyWhile(async () => {
       const stored = await state.storage.get<any>('narrativeState');
       if (stored) {
         this.narrativeState = stored;
-        console.log('Loaded stored state:', this.narrativeState);
+        console.log("Loaded stored state:", this.narrativeState);
       } else {
-        console.log('No stored state, starting fresh.');
+        console.log("No stored state found. Starting fresh.");
       }
     });
   }
@@ -52,55 +47,69 @@ export class NarrativeDO {
     const url = new URL(request.url);
     const path = url.pathname;
     try {
-      if (request.method === 'POST' && path.startsWith('/update')) {
-        // Expecting JSON: { "answer": "some text" }
-        const { answer } = await request.json<{ answer: string }>();
-        console.log('DO /update received answer:', answer);
-        if (!answer || typeof answer !== 'string' || answer.trim().length === 0 || answer.length > 1000) {
-          return new Response(JSON.stringify({ error: 'Invalid answer provided' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
-          });
+      if (request.method === "POST" && path.startsWith("/update")) {
+        // Log the raw body for debugging. Use request.clone() so the stream isn’t consumed.
+        const rawBody = await request.clone().text();
+        console.log("DO /update raw body:", rawBody);
+        // Parse JSON payload.
+        let payload;
+        try {
+          payload = await request.clone().json();
+          console.log("DO /update parsed payload:", payload);
+        } catch (e) {
+          console.error("Failed to parse JSON payload:", e);
+          return new Response(
+            JSON.stringify({ error: "Invalid JSON payload" }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        const { answer } = payload as { answer: string };
+        if (!answer || typeof answer !== "string" || answer.trim().length === 0 || answer.length > 1000) {
+          return new Response(
+            JSON.stringify({ error: "Invalid answer provided" }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
         }
         if (this.narrativeState.answers.length >= 20) {
-          return new Response(JSON.stringify({ error: 'Maximum number of answers reached' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
-          });
+          return new Response(
+            JSON.stringify({ error: "Maximum number of answers reached" }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
         }
         const sanitizedAnswer = answer.trim();
+        console.log("DO state before update:", this.narrativeState);
         this.narrativeState.answers.push(sanitizedAnswer);
         this.narrativeState.lastUpdated = Date.now();
-        await this.state.storage.put('narrativeState', this.narrativeState);
-        console.log('DO state after update:', this.narrativeState);
+        await this.state.storage.put("narrativeState", this.narrativeState);
+        console.log("DO state after update:", this.narrativeState);
         return new Response(
-          JSON.stringify({ message: 'Answer added successfully', answerCount: this.narrativeState.answers.length }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
+          JSON.stringify({ message: "Answer added successfully", answerCount: this.narrativeState.answers.length }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
         );
-      } else if (request.method === 'POST' && path.startsWith('/finalize')) {
-        console.log('DO /finalize request received.');
+      } else if (request.method === "POST" && path.startsWith("/finalize")) {
+        console.log("DO /finalize request received.");
         if (this.narrativeState.answers.length < 1) {
-          return new Response(JSON.stringify({ error: 'Insufficient answers to finalize narrative' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
-          });
+          return new Response(
+            JSON.stringify({ error: "Insufficient answers to finalize narrative" }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
         }
-        const promptContent = this.narrativeState.answers.join('\n');
+        const promptContent = this.narrativeState.answers.join("\n");
         const systemMessage = `You are a narrative storyteller for "Don't Kill The Jam, a Jam Killer Story." 
 The user provided these answers:
 ${promptContent}
-Generate a creative, detailed narrative that captures their dystopian music journey.`.replace(/[<>]/g, '');
+Generate a creative, detailed narrative that captures their dystopian music journey.`.replace(/<\/?[^>]+(>|$)/g, "");
         const userMessage = "Provide a final narrative text with rich imagery and emotional depth.";
         const messages = [
-          { role: 'system', content: systemMessage },
-          { role: 'user', content: userMessage },
+          { role: "system", content: systemMessage },
+          { role: "user", content: userMessage },
         ];
-        // Call the AI binding (fallback if the AI call fails)
+        // Call the AI service; fallback if it fails.
         const aiResponse = await (async () => {
           try {
-            return await (globalThis as any).env.AI.run('@cf/meta/llama-3-8b-instruct', { messages });
+            return await (globalThis as any).env.AI.run("@cf/meta/llama-3-8b-instruct", { messages });
           } catch (error) {
-            console.error('AI call failed:', error);
+            console.error("AI call failed:", error);
             return { choices: [{ message: { content: `Final Narrative: ${promptContent}` } }] };
           }
         })();
@@ -118,102 +127,101 @@ Generate a creative, detailed narrative that captures their dystopian music jour
             processingTime: 0,
           },
         };
-        await this.state.storage.put('finalNarrative', finalNarrativeData);
-        console.log('DO finalized narrative:', finalNarrativeData);
+        await this.state.storage.put("finalNarrative", finalNarrativeData);
+        console.log("DO finalized narrative:", finalNarrativeData);
         return new Response(
-          JSON.stringify({ message: 'Narrative finalized successfully', data: finalNarrativeData }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
+          JSON.stringify({ message: "Narrative finalized successfully", data: finalNarrativeData }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
         );
       } else {
-        return new Response(JSON.stringify({ error: 'Not found' }), {
-          status: 404,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return new Response(
+          JSON.stringify({ error: "Not found" }),
+          { status: 404, headers: { "Content-Type": "application/json" } }
+        );
       }
     } catch (error) {
-      console.error('DO error:', error);
-      return new Response(JSON.stringify({ error: 'Internal server error' }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      console.error("DO error:", error);
+      return new Response(
+        JSON.stringify({ error: "Internal server error" }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
     }
   }
 }
 
 /**
- * Front-end Worker (Routing) using Hono.
- * This part receives public HTTP requests and routes them to the appropriate DO instance.
+ * Front-end Routing Worker using Hono.
+ * This code receives public HTTP requests and forwards them to the appropriate Durable Object.
  */
 const app = new Hono<{ Bindings: Env }>();
 
-// Common middleware: logging, pretty JSON, CORS, and security headers.
-app.use('*', logger());
-app.use('*', prettyJSON());
+// Apply common middleware: logging, pretty JSON, CORS, and security headers.
+app.use("*", logger());
+app.use("*", prettyJSON());
 app.use(
-  '*',
+  "*",
   cors({
-    origin: ['*'],
-    allowMethods: ['GET', 'POST', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization'],
+    origin: ["*"],
+    allowMethods: ["GET", "POST", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
     maxAge: 86400,
   })
 );
-app.options('*', (c) =>
+app.options("*", (c) =>
   new Response(null, {
     status: 204,
     headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      'Access-Control-Max-Age': '86400',
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Max-Age": "86400",
     },
   })
 );
-app.use('*', async (c: Context<{ Bindings: Env }>, next: () => Promise<void>) => {
-  c.header('X-Content-Type-Options', 'nosniff');
-  c.header('X-Frame-Options', 'DENY');
-  c.header('X-XSS-Protection', '1; mode=block');
-  c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
-  c.header('Content-Security-Policy', "default-src 'self'; script-src 'none'; style-src 'none';");
-  c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+app.use("*", async (c: Context<{ Bindings: Env }>, next: () => Promise<void>) => {
+  c.header("X-Content-Type-Options", "nosniff");
+  c.header("X-Frame-Options", "DENY");
+  c.header("X-XSS-Protection", "1; mode=block");
+  c.header("Referrer-Policy", "strict-origin-when-cross-origin");
+  c.header("Content-Security-Policy", "default-src 'self'; script-src 'none'; style-src 'none';");
+  c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   await next();
 });
 
 // Health check route.
-app.get('/', (c) => c.json({ status: 'ok', message: 'Narrative API (Durable Object version) is running' }));
+app.get("/", (c) => c.json({ status: "ok", message: "Narrative API (Durable Object version) is running" }));
 
-// Route to update narrative. Read the request body as text and forward it.
-app.post('/narrative/update/:userId', async (c) => {
-  const userId = c.req.param('userId');
+// Route to update narrative state.
+// This reads the body once and forwards it to the Durable Object.
+app.post("/narrative/update/:userId", async (c) => {
+  const userId = c.req.param("userId");
   if (!userId || userId.length > 100) {
-    return c.json({ error: 'Invalid user ID' }, 400);
+    return c.json({ error: "Invalid user ID" }, 400);
   }
-  // Get the DO instance based on a deterministic ID.
   const id = c.env.NARRATIVE_DO.idFromName(userId);
   const stub = c.env.NARRATIVE_DO.get(id);
-  // Read the request body (as text) once so we can forward it.
   const bodyText = await c.req.text();
   console.log(`Routing /narrative/update/${userId} with body:`, bodyText);
-  const response = await stub.fetch(`https://dummy/update`, {
-    method: 'POST',
+  const response = await stub.fetch("https://dummy/update", {
+    method: "POST",
     headers: c.req.raw.headers,
     body: bodyText,
   });
   return response;
 });
 
-// Route to finalize narrative. Similarly, read and forward the request body.
-app.post('/narrative/finalize/:userId', async (c) => {
-  const userId = c.req.param('userId');
+// Route to finalize narrative.
+app.post("/narrative/finalize/:userId", async (c) => {
+  const userId = c.req.param("userId");
   if (!userId || userId.length > 100) {
-    return c.json({ error: 'Invalid user ID' }, 400);
+    return c.json({ error: "Invalid user ID" }, 400);
   }
   const id = c.env.NARRATIVE_DO.idFromName(userId);
   const stub = c.env.NARRATIVE_DO.get(id);
   const bodyText = await c.req.text();
   console.log(`Routing /narrative/finalize/${userId} with body:`, bodyText);
-  const response = await stub.fetch(`https://dummy/finalize`, {
-    method: 'POST',
+  const response = await stub.fetch("https://dummy/finalize", {
+    method: "POST",
     headers: c.req.raw.headers,
     body: bodyText,
   });
