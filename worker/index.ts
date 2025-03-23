@@ -2,17 +2,25 @@
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { logger } from 'hono/logger';
+import { prettyJSON } from 'hono/pretty-json';
+import type { Context } from 'hono';
 
 // Type definitions for narrative state and final narrative data
 interface NarrativeState {
   answers: string[];
   createdAt: number;
+  lastUpdated: number;
 }
 
 interface FinalNarrativeData {
   narrativeText: string;
   mojoScore: number;
   timestamp: number;
+  metadata: {
+    answerCount: number;
+    processingTime: number;
+  };
 }
 
 // Environment interface: includes KV and AI binding
@@ -30,70 +38,95 @@ interface Env {
 // Create a Hono app instance
 const app = new Hono<{ Bindings: Env }>();
 
-// Apply CORS and security headers
-app.use('*', cors());
-app.use('*', async (c: Hono.Context<Env>, next: () => Promise<void>) => {
+// Apply middleware
+app.use('*', logger());
+app.use('*', prettyJSON());
+app.use('*', cors({
+  origin: ['*'],
+  allowMethods: ['GET', 'POST'],
+  allowHeaders: ['Content-Type', 'Authorization'],
+  exposeHeaders: ['Content-Length', 'X-Request-ID'],
+  maxAge: 86400,
+}));
+
+// Security headers middleware
+app.use('*', async (c: Context<{ Bindings: Env }>, next: () => Promise<void>) => {
   c.header('X-Content-Type-Options', 'nosniff');
   c.header('X-Frame-Options', 'DENY');
-  c.header('Referrer-Policy', 'no-referrer');
-  c.header('Content-Security-Policy', "default-src 'self'");
+  c.header('X-XSS-Protection', '1; mode=block');
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  c.header('Content-Security-Policy', "default-src 'self'; script-src 'none'; style-src 'none';");
+  c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   await next();
 });
 
 // Configure rate limiting
 const rateLimit = {
   windowMs: 60 * 1000, // 1 minute window
-  max: 10,              // 10 requests per IP per window
+  max: 10,             // 10 requests per IP per window
 };
 
 // Helper function to get IP address
 const getIpAddress = (request: Request): string => {
-  return request.headers.get('cf-connecting-ip') || 'unknown';
+  const headers = request.headers;
+  return headers.get('cf-connecting-ip') || 
+         headers.get('x-forwarded-for')?.split(',')[0] || 
+         'unknown';
 };
 
 // Rate limiting middleware using KV storage
-app.use('/narrative/update/*', async (c: Hono.Context<Env>, next: () => Promise<void>) => {
-  const ip = getIpAddress(c.req);
+app.use('/narrative/update/*', async (c: Context<{ Bindings: Env }>, next: () => Promise<void>) => {
+  const ip = getIpAddress(c.req.raw);
   const now = Date.now();
   
-  // Get current count and window end from KV
-  const current = await c.env.RATE_LIMIT_KV.get(ip);
-  if (current) {
-    const { count, windowEnd } = JSON.parse(current);
-    
-    // Check if we're in the same window
-    if (now < windowEnd) {
-      if (count >= rateLimit.max) {
-        return c.json({ error: 'Too many requests' }, 429);
+  try {
+    // Get current count and window end from KV
+    const current = await c.env.RATE_LIMIT_KV.get(ip);
+    if (current) {
+      const { count, windowEnd } = JSON.parse(current);
+      
+      // Check if we're in the same window
+      if (now < windowEnd) {
+        if (count >= rateLimit.max) {
+          return c.json({ 
+            error: 'Too many requests',
+            retryAfter: Math.ceil((windowEnd - now) / 1000)
+          }, 429);
+        }
+        // Increment count
+        await c.env.RATE_LIMIT_KV.put(ip, JSON.stringify({
+          count: count + 1,
+          windowEnd
+        }));
+      } else {
+        // Reset window
+        await c.env.RATE_LIMIT_KV.put(ip, JSON.stringify({
+          count: 1,
+          windowEnd: now + rateLimit.windowMs
+        }));
       }
-      // Increment count
-      await c.env.RATE_LIMIT_KV.put(ip, JSON.stringify({
-        count: count + 1,
-        windowEnd
-      }));
     } else {
-      // Reset window
+      // First request in window
       await c.env.RATE_LIMIT_KV.put(ip, JSON.stringify({
         count: 1,
         windowEnd: now + rateLimit.windowMs
       }));
     }
-  } else {
-    // First request in window
-    await c.env.RATE_LIMIT_KV.put(ip, JSON.stringify({
-      count: 1,
-      windowEnd: now + rateLimit.windowMs
-    }));
+    
+    await next();
+  } catch (error) {
+    console.error('Rate limiting error:', error);
+    // Fail open on rate limiting errors
+    await next();
   }
-  
-  await next();
 });
 
 /**
  * POST /narrative/update/:userId
  * Appends a new answer to the user's narrative state stored in KV.
  */
-app.post('/narrative/update/:userId', async (c: Hono.Context<Env>) => {
+app.post('/narrative/update/:userId', async (c: Context<{ Bindings: Env }>) => {
+  const startTime = Date.now();
   try {
     const userId = c.req.param('userId');
     if (!userId || typeof userId !== 'string' || userId.length > 100) {
@@ -116,10 +149,12 @@ app.post('/narrative/update/:userId', async (c: Hono.Context<Env>) => {
         return c.json({ error: 'Maximum number of answers reached' }, 400);
       }
       state.answers.push(sanitizedAnswer);
+      state.lastUpdated = Date.now();
     } else {
       state = { 
         answers: [sanitizedAnswer], 
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        lastUpdated: Date.now()
       };
     }
     
@@ -127,7 +162,8 @@ app.post('/narrative/update/:userId', async (c: Hono.Context<Env>) => {
     return c.json({ 
       message: 'Answer added successfully',
       data: {
-        answerCount: state.answers.length
+        answerCount: state.answers.length,
+        processingTime: Date.now() - startTime
       }
     });
   } catch (error) {
@@ -140,7 +176,8 @@ app.post('/narrative/update/:userId', async (c: Hono.Context<Env>) => {
  * POST /narrative/finalize/:userId
  * Finalizes the narrative and generates the final story
  */
-app.post('/narrative/finalize/:userId', async (c: Hono.Context<Env>) => {
+app.post('/narrative/finalize/:userId', async (c: Context<{ Bindings: Env }>) => {
+  const startTime = Date.now();
   try {
     const userId = c.req.param('userId');
     if (!userId || typeof userId !== 'string' || userId.length > 100) {
@@ -175,15 +212,20 @@ app.post('/narrative/finalize/:userId', async (c: Hono.Context<Env>) => {
     const aiResponse = await c.env.AI.run("@cf/meta/llama-3-8b-instruct", { messages });
     const finalNarrativeText = aiResponse.choices[0].message.content;
 
-    // Improved Mojo score calculation
+    // Improved Mojo score calculation with more factors
     const totalAnswerLength = state.answers.reduce((sum, ans) => sum + ans.length, 0);
     const averageAnswerLength = totalAnswerLength / state.answers.length;
-    const mojoScore = Math.min(Math.floor(averageAnswerLength * 10), 100);
+    const answerCountFactor = Math.min(state.answers.length / 10, 1);
+    const mojoScore = Math.min(Math.floor((averageAnswerLength * 10 + answerCountFactor * 20)), 100);
 
     const finalNarrativeData: FinalNarrativeData = {
       narrativeText: finalNarrativeText,
       mojoScore,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      metadata: {
+        answerCount: state.answers.length,
+        processingTime: Date.now() - startTime
+      }
     };
 
     // Delete the state after finalization

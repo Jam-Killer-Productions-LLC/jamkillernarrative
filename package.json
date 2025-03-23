@@ -1,19 +1,20 @@
 {
   "name": "jamkillernarrative",
   "version": "1.0.0",
-  "description": "<!-- dash-content-start -->",
+  "description": "A narrative generation service using Cloudflare Workers",
   "main": "worker/index.ts",
+  "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "build": "wrangler build",
-    "deploy": "npx wrangler deploy",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "deploy": "wrangler deploy",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint . --ext .ts"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Jam-Killer-Productions-LLC/jamkillernarrative.git"
   },
-  "keywords": [],
+  "keywords": ["cloudflare", "workers", "ai", "narrative"],
   "author": "",
   "license": "ISC",
   "bugs": {
@@ -24,6 +25,11 @@
     "hono": "^4.7.4"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250313.0"
+    "@cloudflare/workers-types": "^4.20240208.0",
+    "@types/node": "^20.11.24",
+    "@typescript-eslint/eslint-plugin": "^7.1.0",
+    "@typescript-eslint/parser": "^7.1.0",
+    "eslint": "^8.57.0",
+    "typescript": "^5.3.3"
   }
 }
