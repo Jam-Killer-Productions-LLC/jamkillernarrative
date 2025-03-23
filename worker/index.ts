@@ -47,10 +47,26 @@ export class NarrativeDO {
     const url = new URL(request.url);
     const path = url.pathname;
     try {
+      // =========================
+      // 1) Handle OPTIONS (CORS)
+      // =========================
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Max-Age": "86400",
+          },
+        });
+      }
+
       if (request.method === "POST" && path.startsWith("/update")) {
         // Log the raw body for debugging. Use request.clone() so the stream isn’t consumed.
         const rawBody = await request.clone().text();
         console.log("DO /update raw body:", rawBody);
+
         // Parse JSON payload.
         let payload;
         try {
@@ -60,40 +76,84 @@ export class NarrativeDO {
           console.error("Failed to parse JSON payload:", e);
           return new Response(
             JSON.stringify({ error: "Invalid JSON payload" }),
-            { status: 400, headers: { "Content-Type": "application/json" } }
+            {
+              status: 400,
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+              },
+            }
           );
         }
+
         const { answer } = payload as { answer: string };
-        if (!answer || typeof answer !== "string" || answer.trim().length === 0 || answer.length > 1000) {
+        if (
+          !answer ||
+          typeof answer !== "string" ||
+          answer.trim().length === 0 ||
+          answer.length > 1000
+        ) {
           return new Response(
             JSON.stringify({ error: "Invalid answer provided" }),
-            { status: 400, headers: { "Content-Type": "application/json" } }
+            {
+              status: 400,
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+              },
+            }
           );
         }
+
         if (this.narrativeState.answers.length >= 20) {
           return new Response(
             JSON.stringify({ error: "Maximum number of answers reached" }),
-            { status: 400, headers: { "Content-Type": "application/json" } }
+            {
+              status: 400,
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+              },
+            }
           );
         }
+
         const sanitizedAnswer = answer.trim();
         console.log("DO state before update:", this.narrativeState);
         this.narrativeState.answers.push(sanitizedAnswer);
         this.narrativeState.lastUpdated = Date.now();
         await this.state.storage.put("narrativeState", this.narrativeState);
         console.log("DO state after update:", this.narrativeState);
+
         return new Response(
-          JSON.stringify({ message: "Answer added successfully", answerCount: this.narrativeState.answers.length }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          JSON.stringify({
+            message: "Answer added successfully",
+            answerCount: this.narrativeState.answers.length,
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            },
+          }
         );
       } else if (request.method === "POST" && path.startsWith("/finalize")) {
         console.log("DO /finalize request received.");
+
         if (this.narrativeState.answers.length < 1) {
           return new Response(
             JSON.stringify({ error: "Insufficient answers to finalize narrative" }),
-            { status: 400, headers: { "Content-Type": "application/json" } }
+            {
+              status: 400,
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+              },
+            }
           );
         }
+
         const promptContent = this.narrativeState.answers.join("\n");
         const systemMessage = `You are a narrative storyteller for "Don't Kill The Jam, a Jam Killer Story." 
 The user provided these answers:
@@ -104,15 +164,19 @@ Generate a creative, detailed narrative that captures their dystopian music jour
           { role: "system", content: systemMessage },
           { role: "user", content: userMessage },
         ];
+
         // Call the AI service; fallback if it fails.
         const aiResponse = await (async () => {
           try {
-            return await (globalThis as any).env.AI.run("@cf/meta/llama-3-8b-instruct", { messages });
+            return await (globalThis as any).env.AI.run("@cf/meta/llama-3-8b-instruct", {
+              messages,
+            });
           } catch (error) {
             console.error("AI call failed:", error);
             return { choices: [{ message: { content: `Final Narrative: ${promptContent}` } }] };
           }
         })();
+
         const finalNarrativeText = aiResponse.choices[0].message.content;
         const totalAnswerLength = this.narrativeState.answers.reduce((sum, ans) => sum + ans.length, 0);
         const averageAnswerLength = totalAnswerLength / this.narrativeState.answers.length;
@@ -129,21 +193,40 @@ Generate a creative, detailed narrative that captures their dystopian music jour
         };
         await this.state.storage.put("finalNarrative", finalNarrativeData);
         console.log("DO finalized narrative:", finalNarrativeData);
+
         return new Response(
           JSON.stringify({ message: "Narrative finalized successfully", data: finalNarrativeData }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            },
+          }
         );
       } else {
         return new Response(
           JSON.stringify({ error: "Not found" }),
-          { status: 404, headers: { "Content-Type": "application/json" } }
+          {
+            status: 404,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            },
+          }
         );
       }
     } catch (error) {
       console.error("DO error:", error);
       return new Response(
         JSON.stringify({ error: "Internal server error" }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
+        {
+          status: 500,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        }
       );
     }
   }
@@ -167,6 +250,8 @@ app.use(
     maxAge: 86400,
   })
 );
+
+// Explicit OPTIONS route for Hono-level preflight.
 app.options("*", (c) =>
   new Response(null, {
     status: 204,
@@ -178,6 +263,7 @@ app.options("*", (c) =>
     },
   })
 );
+
 app.use("*", async (c: Context<{ Bindings: Env }>, next: () => Promise<void>) => {
   c.header("X-Content-Type-Options", "nosniff");
   c.header("X-Frame-Options", "DENY");
