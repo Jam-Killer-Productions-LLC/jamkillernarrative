@@ -43,7 +43,7 @@ app.use('*', logger());
 app.use('*', prettyJSON());
 app.use('*', cors({
   origin: ['*'],
-  allowMethods: ['GET', 'POST', 'OPTIONS'], // Added OPTIONS
+  allowMethods: ['GET', 'POST'],
   allowHeaders: ['Content-Type', 'Authorization'],
   exposeHeaders: ['Content-Length', 'X-Request-ID'],
   maxAge: 86400,
@@ -79,11 +79,6 @@ const getIpAddress = (request: Request): string => {
 
 // Rate limiting middleware using KV storage
 app.use('/narrative/update/*', async (c: Context<{ Bindings: Env }>, next: () => Promise<void>) => {
-  // Skip rate limiting for OPTIONS (preflight) requests
-  if (c.req.method === 'OPTIONS') {
-    return await next();
-  }
-  
   const ip = getIpAddress(c.req.raw);
   const now = Date.now();
   
@@ -148,16 +143,32 @@ app.post('/narrative/update/:userId', async (c: Context<{ Bindings: Env }>) => {
     }
     const sanitizedAnswer = answer.trim();
 
+    // Log the KV namespace to verify it exists
+    console.log('KV Namespace:', c.env.narrativesjamkiller);
+
+    // Try to get existing data
     const existingData = await c.env.narrativesjamkiller.get(userId);
+    console.log('Existing data:', existingData);
+
     let state: NarrativeState;
     
     if (existingData) {
-      state = JSON.parse(existingData);
-      if (state.answers.length >= 20) {
-        return c.json({ error: 'Maximum number of answers reached' }, 400);
+      try {
+        state = JSON.parse(existingData);
+        if (state.answers.length >= 20) {
+          return c.json({ error: 'Maximum number of answers reached' }, 400);
+        }
+        state.answers.push(sanitizedAnswer);
+        state.lastUpdated = Date.now();
+      } catch (parseError) {
+        console.error('Error parsing existing data:', parseError);
+        // If parsing fails, start fresh
+        state = { 
+          answers: [sanitizedAnswer], 
+          createdAt: Date.now(),
+          lastUpdated: Date.now()
+        };
       }
-      state.answers.push(sanitizedAnswer);
-      state.lastUpdated = Date.now();
     } else {
       state = { 
         answers: [sanitizedAnswer], 
@@ -166,7 +177,18 @@ app.post('/narrative/update/:userId', async (c: Context<{ Bindings: Env }>) => {
       };
     }
     
-    await c.env.narrativesjamkiller.put(userId, JSON.stringify(state));
+    // Log the state we're about to save
+    console.log('Saving state:', state);
+    
+    // Save to KV with explicit error handling
+    try {
+      await c.env.narrativesjamkiller.put(userId, JSON.stringify(state));
+      console.log('Successfully saved to KV');
+    } catch (kvError) {
+      console.error('Error saving to KV:', kvError);
+      return c.json({ error: 'Failed to save narrative state' }, 500);
+    }
+
     return c.json({ 
       message: 'Answer added successfully',
       data: {
@@ -202,13 +224,13 @@ app.post('/narrative/finalize/:userId', async (c: Context<{ Bindings: Env }>) =>
       return c.json({ error: 'Insufficient answers to finalize narrative' }, 400);
     }
 
-    // Prepare prompt content
+    // Sanitize and prepare prompt content
     const promptContent = state.answers.join('\n');
     
-    // Sanitize and prepare messages to prevent injection
+    // Sanitize messages to prevent injection
     const systemMessage = `You are a narrative storyteller for "Don't Kill The Jam, a Jam Killer Story." 
-The user provided these answers:\n${promptContent}\nGenerate a creative, detailed narrative that captures 
-their dystopian music journey.`.replace(/<\/?[^>]+(>|$)/g, '');
+    The user provided these answers:\n${promptContent}\nGenerate a creative, detailed narrative that captures 
+    their dystopian music journey.`.replace(/<\/?[^>]+(>|$)/g, '');
     
     const userMessage = "Provide a final narrative text with rich imagery and emotional depth.";
     
@@ -220,7 +242,7 @@ their dystopian music journey.`.replace(/<\/?[^>]+(>|$)/g, '');
     const aiResponse = await c.env.AI.run("@cf/meta/llama-3-8b-instruct", { messages });
     const finalNarrativeText = aiResponse.choices[0].message.content;
 
-    // Calculate Mojo score using average answer length and count factor
+    // Improved Mojo score calculation with more factors
     const totalAnswerLength = state.answers.reduce((sum, ans) => sum + ans.length, 0);
     const averageAnswerLength = totalAnswerLength / state.answers.length;
     const answerCountFactor = Math.min(state.answers.length / 10, 1);
@@ -236,8 +258,9 @@ their dystopian music journey.`.replace(/<\/?[^>]+(>|$)/g, '');
       }
     };
 
-    // Delete the state after finalization
-    await c.env.narrativesjamkiller.delete(userId);
+    // Save the final narrative instead of deleting
+    const finalKey = `${userId}_final`;
+    await c.env.narrativesjamkiller.put(finalKey, JSON.stringify(finalNarrativeData));
     
     return c.json({ 
       message: 'Narrative finalized successfully',
