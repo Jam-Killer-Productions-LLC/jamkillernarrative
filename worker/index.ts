@@ -38,19 +38,33 @@ interface Env {
 // Create a Hono app instance
 const app = new Hono<{ Bindings: Env }>();
 
-// Apply middleware
+// Apply middleware: logging, pretty JSON output, and CORS
 app.use('*', logger());
 app.use('*', prettyJSON());
-app.use('*', cors({
-  origin: ['*'],
-  allowMethods: ['GET', 'POST'],
-  allowHeaders: ['Content-Type', 'Authorization'],
-  exposeHeaders: ['Content-Length', 'X-Request-ID'],
-  maxAge: 86400,
-}));
+app.use(
+  '*',
+  cors({
+    origin: ['*'],
+    allowMethods: ['GET', 'POST'],
+    allowHeaders: ['Content-Type', 'Authorization'],
+    exposeHeaders: ['Content-Length', 'X-Request-ID'],
+    maxAge: 86400,
+  })
+);
 
-// Add root route handler
-app.get('/', (c) => c.json({ status: 'ok', message: 'Narrative API is running' }));
+// Explicit OPTIONS route handling (in addition to CORS middleware)
+// This ensures that any preflight requests receive a 204 response with the appropriate headers.
+app.options('*', (c) => {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Max-Age": "86400",
+    },
+  });
+});
 
 // Security headers middleware
 app.use('*', async (c: Context<{ Bindings: Env }>, next: () => Promise<void>) => {
@@ -63,21 +77,24 @@ app.use('*', async (c: Context<{ Bindings: Env }>, next: () => Promise<void>) =>
   await next();
 });
 
-// Configure rate limiting
+// Root route handler
+app.get('/', (c) => c.json({ status: 'ok', message: 'Narrative API is running' }));
+
+// Configure rate limiting settings
 const rateLimit = {
   windowMs: 60 * 1000, // 1 minute window
   max: 10,             // 10 requests per IP per window
 };
 
-// Helper function to get IP address
+// Helper function to extract IP address from request headers
 const getIpAddress = (request: Request): string => {
   const headers = request.headers;
-  return headers.get('cf-connecting-ip') || 
-         headers.get('x-forwarded-for')?.split(',')[0] || 
+  return headers.get('cf-connecting-ip') ||
+         headers.get('x-forwarded-for')?.split(',')[0] ||
          'unknown';
 };
 
-// Rate limiting middleware using KV storage
+// Rate limiting middleware using KV storage for the /narrative/update/* endpoints
 app.use('/narrative/update/*', async (c: Context<{ Bindings: Env }>, next: () => Promise<void>) => {
   const ip = getIpAddress(c.req.raw);
   const now = Date.now();
@@ -88,7 +105,7 @@ app.use('/narrative/update/*', async (c: Context<{ Bindings: Env }>, next: () =>
     if (current) {
       const { count, windowEnd } = JSON.parse(current);
       
-      // Check if we're in the same window
+      // Check if we're still in the current rate limit window
       if (now < windowEnd) {
         if (count >= rateLimit.max) {
           return c.json({ 
@@ -109,7 +126,7 @@ app.use('/narrative/update/*', async (c: Context<{ Bindings: Env }>, next: () =>
         }));
       }
     } else {
-      // First request in window
+      // First request in the window
       await c.env.RATE_LIMIT_KV.put(ip, JSON.stringify({
         count: 1,
         windowEnd: now + rateLimit.windowMs
@@ -146,7 +163,7 @@ app.post('/narrative/update/:userId', async (c: Context<{ Bindings: Env }>) => {
     // Log the KV namespace to verify it exists
     console.log('KV Namespace:', c.env.narrativesjamkiller);
 
-    // Try to get existing data
+    // Try to get existing narrative state for the user
     const existingData = await c.env.narrativesjamkiller.get(userId);
     console.log('Existing data:', existingData);
 
@@ -180,7 +197,7 @@ app.post('/narrative/update/:userId', async (c: Context<{ Bindings: Env }>) => {
     // Log the state we're about to save
     console.log('Saving state:', state);
     
-    // Save to KV with explicit error handling
+    // Save the updated narrative state to KV
     try {
       await c.env.narrativesjamkiller.put(userId, JSON.stringify(state));
       console.log('Successfully saved to KV');
@@ -204,7 +221,7 @@ app.post('/narrative/update/:userId', async (c: Context<{ Bindings: Env }>) => {
 
 /**
  * POST /narrative/finalize/:userId
- * Finalizes the narrative and generates the final story
+ * Finalizes the narrative and generates the final story.
  */
 app.post('/narrative/finalize/:userId', async (c: Context<{ Bindings: Env }>) => {
   const startTime = Date.now();
@@ -224,13 +241,14 @@ app.post('/narrative/finalize/:userId', async (c: Context<{ Bindings: Env }>) =>
       return c.json({ error: 'Insufficient answers to finalize narrative' }, 400);
     }
 
-    // Sanitize and prepare prompt content
+    // Prepare the prompt content using stored answers
     const promptContent = state.answers.join('\n');
     
-    // Sanitize messages to prevent injection
+    // Sanitize and prepare messages to prevent injection
     const systemMessage = `You are a narrative storyteller for "Don't Kill The Jam, a Jam Killer Story." 
-    The user provided these answers:\n${promptContent}\nGenerate a creative, detailed narrative that captures 
-    their dystopian music journey.`.replace(/<\/?[^>]+(>|$)/g, '');
+The user provided these answers:
+${promptContent}
+Generate a creative, detailed narrative that captures their dystopian music journey.`.replace(/<\/?[^>]+(>|$)/g, '');
     
     const userMessage = "Provide a final narrative text with rich imagery and emotional depth.";
     
@@ -239,10 +257,11 @@ app.post('/narrative/finalize/:userId', async (c: Context<{ Bindings: Env }>) =>
       { role: "user", content: userMessage }
     ];
 
+    // Call the AI binding to generate the final narrative
     const aiResponse = await c.env.AI.run("@cf/meta/llama-3-8b-instruct", { messages });
     const finalNarrativeText = aiResponse.choices[0].message.content;
 
-    // Improved Mojo score calculation with more factors
+    // Calculate an improved Mojo score
     const totalAnswerLength = state.answers.reduce((sum, ans) => sum + ans.length, 0);
     const averageAnswerLength = totalAnswerLength / state.answers.length;
     const answerCountFactor = Math.min(state.answers.length / 10, 1);
@@ -258,7 +277,7 @@ app.post('/narrative/finalize/:userId', async (c: Context<{ Bindings: Env }>) =>
       }
     };
 
-    // Save the final narrative instead of deleting
+    // Save the final narrative instead of deleting the state
     const finalKey = `${userId}_final`;
     await c.env.narrativesjamkiller.put(finalKey, JSON.stringify(finalNarrativeData));
     
