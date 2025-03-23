@@ -43,7 +43,7 @@ app.use('*', logger());
 app.use('*', prettyJSON());
 app.use('*', cors({
   origin: ['*'],
-  allowMethods: ['GET', 'POST'],
+  allowMethods: ['GET', 'POST', 'OPTIONS'], // Added OPTIONS
   allowHeaders: ['Content-Type', 'Authorization'],
   exposeHeaders: ['Content-Length', 'X-Request-ID'],
   maxAge: 86400,
@@ -79,6 +79,11 @@ const getIpAddress = (request: Request): string => {
 
 // Rate limiting middleware using KV storage
 app.use('/narrative/update/*', async (c: Context<{ Bindings: Env }>, next: () => Promise<void>) => {
+  // Skip rate limiting for OPTIONS (preflight) requests
+  if (c.req.method === 'OPTIONS') {
+    return await next();
+  }
+  
   const ip = getIpAddress(c.req.raw);
   const now = Date.now();
   
@@ -197,13 +202,13 @@ app.post('/narrative/finalize/:userId', async (c: Context<{ Bindings: Env }>) =>
       return c.json({ error: 'Insufficient answers to finalize narrative' }, 400);
     }
 
-    // Sanitize and prepare prompt content
+    // Prepare prompt content
     const promptContent = state.answers.join('\n');
     
-    // Sanitize messages to prevent injection
+    // Sanitize and prepare messages to prevent injection
     const systemMessage = `You are a narrative storyteller for "Don't Kill The Jam, a Jam Killer Story." 
-    The user provided these answers:\n${promptContent}\nGenerate a creative, detailed narrative that captures 
-    their dystopian music journey.`.replace(/<\/?[^>]+(>|$)/g, '');
+The user provided these answers:\n${promptContent}\nGenerate a creative, detailed narrative that captures 
+their dystopian music journey.`.replace(/<\/?[^>]+(>|$)/g, '');
     
     const userMessage = "Provide a final narrative text with rich imagery and emotional depth.";
     
@@ -215,7 +220,7 @@ app.post('/narrative/finalize/:userId', async (c: Context<{ Bindings: Env }>) =>
     const aiResponse = await c.env.AI.run("@cf/meta/llama-3-8b-instruct", { messages });
     const finalNarrativeText = aiResponse.choices[0].message.content;
 
-    // Improved Mojo score calculation with more factors
+    // Calculate Mojo score using average answer length and count factor
     const totalAnswerLength = state.answers.reduce((sum, ans) => sum + ans.length, 0);
     const averageAnswerLength = totalAnswerLength / state.answers.length;
     const answerCountFactor = Math.min(state.answers.length / 10, 1);
