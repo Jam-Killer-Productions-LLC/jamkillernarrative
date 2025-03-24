@@ -54,9 +54,10 @@ export class NarrativeDO {
         return new Response(null, {
           status: 204,
           headers: {
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": "https://mojohand.producerprotocol.pro",
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
+            "Access-Control-Allow-Credentials": "true",
             "Access-Control-Max-Age": "86400",
           },
         });
@@ -80,7 +81,8 @@ export class NarrativeDO {
               status: 400,
               headers: {
                 "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Origin": "https://mojohand.producerprotocol.pro",
+                "Access-Control-Allow-Credentials": "true"
               },
             }
           );
@@ -99,7 +101,8 @@ export class NarrativeDO {
               status: 400,
               headers: {
                 "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Origin": "https://mojohand.producerprotocol.pro",
+                "Access-Control-Allow-Credentials": "true"
               },
             }
           );
@@ -112,7 +115,8 @@ export class NarrativeDO {
               status: 400,
               headers: {
                 "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Origin": "https://mojohand.producerprotocol.pro",
+                "Access-Control-Allow-Credentials": "true"
               },
             }
           );
@@ -134,7 +138,8 @@ export class NarrativeDO {
             status: 200,
             headers: {
               "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Origin": "https://mojohand.producerprotocol.pro",
+              "Access-Control-Allow-Credentials": "true"
             },
           }
         );
@@ -148,7 +153,8 @@ export class NarrativeDO {
               status: 400,
               headers: {
                 "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Origin": "https://mojohand.producerprotocol.pro",
+                "Access-Control-Allow-Credentials": "true"
               },
             }
           );
@@ -200,7 +206,8 @@ Generate a creative, detailed narrative that captures their dystopian music jour
             status: 200,
             headers: {
               "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Origin": "https://mojohand.producerprotocol.pro",
+              "Access-Control-Allow-Credentials": "true"
             },
           }
         );
@@ -211,7 +218,8 @@ Generate a creative, detailed narrative that captures their dystopian music jour
             status: 404,
             headers: {
               "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Origin": "https://mojohand.producerprotocol.pro",
+              "Access-Control-Allow-Credentials": "true"
             },
           }
         );
@@ -224,7 +232,8 @@ Generate a creative, detailed narrative that captures their dystopian music jour
           status: 500,
           headers: {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": "https://mojohand.producerprotocol.pro",
+            "Access-Control-Allow-Credentials": "true"
           },
         }
       );
@@ -244,9 +253,10 @@ app.use("*", prettyJSON());
 app.use(
   "*",
   cors({
-    origin: ["*"],
+    origin: ["https://mojohand.producerprotocol.pro"],
     allowMethods: ["GET", "POST", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization"],
+    allowHeaders: ["Content-Type", "Authorization", "Accept"],
+    credentials: true,
     maxAge: 86400,
   })
 );
@@ -256,9 +266,10 @@ app.options("*", (c) =>
   new Response(null, {
     status: 204,
     headers: {
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": "https://mojohand.producerprotocol.pro",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
+      "Access-Control-Allow-Credentials": "true",
       "Access-Control-Max-Age": "86400",
     },
   })
