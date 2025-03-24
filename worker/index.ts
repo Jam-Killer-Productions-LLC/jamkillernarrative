@@ -36,9 +36,9 @@ export class NarrativeDO {
       const stored = await state.storage.get<any>('narrativeState');
       if (stored) {
         this.narrativeState = stored;
-        console.log("Loaded stored state:", this.narrativeState);
+        console.log('Loaded stored state:', this.narrativeState);
       } else {
-        console.log("No stored state found. Starting fresh.");
+        console.log('No stored state found. Starting fresh.');
       }
     });
   }
@@ -122,6 +122,7 @@ export class NarrativeDO {
       } else if (request.method === 'POST' && path.startsWith('/finalize')) {
         console.log('DO /finalize request received.');
 
+        // Require at least one answer
         if (this.narrativeState.answers.length < 1) {
           return new Response(
             JSON.stringify({ error: 'Insufficient answers to finalize narrative' }),
@@ -129,6 +130,7 @@ export class NarrativeDO {
           );
         }
 
+        // Build system prompt
         const promptContent = this.narrativeState.answers.join('\n');
         const systemMessage = `You are a narrative storyteller for "Don't Kill The Jam, a Jam Killer Story." 
 The user provided these answers:
@@ -137,38 +139,68 @@ Generate a creative, detailed narrative that captures their dystopian music jour
           /<\/?[^>]+(>|$)/g,
           ''
         );
+
+        // The user's request to finalize
         const userMessage = 'Provide a final narrative text with rich imagery and emotional depth.';
         const messages = [
           { role: 'system', content: systemMessage },
           { role: 'user', content: userMessage },
         ];
 
+        // Attempt the AI call; fallback if it throws
         const aiResponse = await (async () => {
           try {
-            return await this.env.AI.run('@cf/meta/llama-3-8b-instruct', { messages });
+            const res = await this.env.AI.run('@cf/meta/llama-3-8b-instruct', { messages });
+            console.log('Raw AI response:', JSON.stringify(res));
+            return res;
           } catch (error) {
             console.error('AI call failed:', error);
+            // Fallback if the AI call throws an exception
             return { choices: [{ message: { content: `Final Narrative: ${promptContent}` } }] };
           }
         })();
 
-        const finalNarrativeText = aiResponse.choices[0].message.content;
-        const totalAnswerLength = this.narrativeState.answers.reduce((sum, ans) => sum + ans.length, 0);
+        // Safely parse final narrative text
+        let finalNarrativeText: string;
+        if (
+          aiResponse &&
+          Array.isArray(aiResponse.choices) &&
+          aiResponse.choices.length > 0 &&
+          aiResponse.choices[0].message &&
+          typeof aiResponse.choices[0].message.content === 'string'
+        ) {
+          finalNarrativeText = aiResponse.choices[0].message.content;
+        } else {
+          console.error('AI response did not contain expected structure:', aiResponse);
+          finalNarrativeText = `Final Narrative (fallback): ${promptContent}`;
+        }
+
+        // Compute a "mojoScore"
+        const totalAnswerLength = this.narrativeState.answers.reduce(
+          (sum, ans) => sum + ans.length,
+          0
+        );
         const averageAnswerLength = totalAnswerLength / this.narrativeState.answers.length;
         const answerCountFactor = Math.min(this.narrativeState.answers.length / 10, 1);
-        const mojoScore = Math.min(Math.floor(averageAnswerLength * 10 + answerCountFactor * 20), 100);
+        const mojoScore = Math.min(
+          Math.floor(averageAnswerLength * 10 + answerCountFactor * 20),
+          100
+        );
+
+        // Store the final narrative
         const finalNarrativeData = {
           narrativeText: finalNarrativeText,
           mojoScore,
           timestamp: Date.now(),
           metadata: {
             answerCount: this.narrativeState.answers.length,
-            processingTime: 0, // You could measure this if needed
+            processingTime: 0, // optional to measure
           },
         };
         await this.state.storage.put('finalNarrative', finalNarrativeData);
         console.log('DO finalized narrative:', finalNarrativeData);
 
+        // Return success
         return new Response(
           JSON.stringify({ message: 'Narrative finalized successfully', data: finalNarrativeData }),
           { status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
@@ -228,7 +260,9 @@ app.use('*', async (c: Context<{ Bindings: Env }>, next) => {
 });
 
 // Health check
-app.get('/', (c) => c.json({ status: 'ok', message: 'Narrative API (Durable Object version) is running' }));
+app.get('/', (c) =>
+  c.json({ status: 'ok', message: 'Narrative API (Durable Object version) is running' })
+);
 
 // Update narrative
 app.post('/narrative/update/:userId', async (c) => {
@@ -265,7 +299,8 @@ app.post('/narrative/finalize/:userId', async (c) => {
 });
 
 // Favicon handler
-const FAVICON_URL = 'https://bafybeig6dpytw3q4v7vzdy6sb7q4x3apqgrvfi3zsbvb3n6wvs5unfr36i.ipfs.dweb.link?filename=480.gif';
+const FAVICON_URL =
+  'https://bafybeig6dpytw3q4v7vzdy6sb7q4x3apqgrvfi3zsbvb3n6wvs5unfr36i.ipfs.dweb.link?filename=480.gif';
 app.get('/favicon.ico', async () => {
   try {
     const response = await fetch(FAVICON_URL);
