@@ -63,7 +63,7 @@ export class NarrativeDO {
       }
 
       if (request.method === "POST" && path.startsWith("/update")) {
-        // Log the raw body for debugging. Use request.clone() so the stream isn’t consumed.
+        // Log the raw body for debugging. Use request.clone() so the stream isn't consumed.
         const rawBody = await request.clone().text();
         console.log("DO /update raw body:", rawBody);
 
@@ -313,5 +313,31 @@ app.post("/narrative/finalize/:userId", async (c) => {
   });
   return response;
 });
+
+const FAVICON_URL = "https://bafybeig6dpytw3q4v7vzdy6sb7q4x3apqgrvfi3zsbvb3n6wvs5unfr36i.ipfs.dweb.link?filename=480.gif";
+
+// Handle favicon.ico requests
+async function handleFaviconRequest(): Promise<Response> {
+  try {
+    // Fetch the GIF from IPFS
+    const response = await fetch(FAVICON_URL);
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch favicon');
+    }
+
+    // Return the GIF with appropriate headers
+    return new Response(response.body, {
+      status: 200,
+      headers: {
+        'Content-Type': 'image/gif',
+        'Cache-Control': 'public, max-age=86400', // Cache for 24 hours
+      }
+    });
+  } catch (error) {
+    // If fetch fails, return a 204 No Content
+    return new Response(null, { status: 204 });
+  }
+}
 
 export default app;
