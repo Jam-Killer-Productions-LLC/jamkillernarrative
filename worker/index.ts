@@ -86,6 +86,20 @@ export class NarrativeDO {
         }
 
         const { answer } = payload as { answer: string };
+
+        // Handle CLEAR_NARRATIVE command
+        if (answer === "CLEAR_NARRATIVE") {
+          console.log('Clearing narrative data...');
+          this.narrativeState = { answers: [], createdAt: Date.now(), lastUpdated: Date.now() };
+          await this.state.storage.put('narrativeState', this.narrativeState);
+          await this.state.storage.delete('finalNarrative'); // Also clear any finalized narrative
+          return new Response(
+            JSON.stringify({ message: 'Narrative data cleared successfully' }),
+            { status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          );
+        }
+
+        // Regular answer validation
         if (
           !answer ||
           typeof answer !== 'string' ||
