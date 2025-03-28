@@ -87,7 +87,7 @@ export class NarrativeDO {
 
         const { answer } = payload as { answer: string };
 
-        // Handle CLEAR_NARRATIVE command
+        // Handle CLEAR_NARRATIVE command before regular validation
         if (answer === "CLEAR_NARRATIVE") {
           console.log('Clearing narrative data...');
           this.narrativeState = { answers: [], createdAt: Date.now(), lastUpdated: Date.now() };
